@@ -59,19 +59,39 @@ quadcopter = Quadcopter(Mass, ...
                quadcopterInitControlInputs,...
                deltaT);
 
+%Inicializace vizualizace
+figure(WindowState="maximized")
+hold on
+grid on
+
 % Simulation
 for i = 1 : deltaT : simulationTime
     
     % Action for total thrust
-    quadcopter.TotalThrustControlAction(0);
+    quadcopter.TotalThrustControlAction(100);
     % Action for attitude
-    quadcopter.AttitudeControlAction(0,0,0);
+    % prvni ovlada smer Y, druhy ovlada smer X, treti ovlada smer Z
+    quadcopter.AttitudeControlAction(0,10,0);
    
     % Update state of quadcopter
     quadcopter.UpdateState();
 
     % Get actual state of quadcopter
     quadcopterActualState = quadcopter.GetState();
+
+    %Vizualizace
+    hold off
+    plot3(quadcopterActualState.BodyXYZPosition.X,quadcopterActualState.BodyXYZPosition.Y,quadcopterActualState.BodyXYZPosition.Z,'xb')
+    hold on
+    [X,Y] = meshgrid(-0.5:0.1:4,-0.5:0.1:1.5);
+    Z = zeros(size(X));
+    plot3(X,Y,Z,'k.')
+    plot3(wayPoints(:,1),wayPoints(:,2),wayPoints(:,3),'r-')
+    xlabel('x')
+    ylabel('y')
+    zlabel('z')
+    pause(deltaT)
+
     
     % Crash check
     if (quadcopterActualState.BodyXYZPosition.Z >= 0)
