@@ -2,7 +2,7 @@ clc, clear, clf, close, format compact;
 
 %% Instructions
 % At these times, the quadcopter must pass the appropriate waypoint
-timeForWaypointPasage = [0,220,330,440,550]/11; % [s]
+timeForWaypointPasage = [110,220,330,440,550]; % [s]
 
 % Waypoints - these points must be flown by quadcopter
 wayPoints = [0 0 -6;        % [X, Y, Z] - waypoint in [m]
@@ -68,7 +68,7 @@ zAxis.B = [0; g];
 zAxis.C = eye(2);
 zAxis.D = [0; 0];
 
-zAxis.poles = [complex(-4,5), complex(-4,-5)];  % Much more aggressive controller
+zAxis.poles = [complex(-4,1), complex(-4,-1)];
 
 mysysZ = configure_observer(zAxis);
 
@@ -137,7 +137,6 @@ figure(WindowState="maximized")
 hold on
 grid on
 speedUp = 100;
-settleTime = 10;
 
 pause(2)
 %% Simulation
@@ -156,93 +155,110 @@ for i = 0 : deltaT : simulationTime
     % Get actual state of quadcopter
     quadcopterActualState = quadcopter.GetState();
     
-    %% Z
-    currentPosZ = quadcopterActualState.BodyXYZPosition.Z;
-    currentVelZ = quadcopterActualState.BodyXYZVelocity.Z;
-    requiredVelZ = -(currentWaypoint(3) - currentPosZ)/settleTime;
-    t = linspace(0, deltaT, 3);   
-    
-    ref = [requiredVelZ, requiredVelZ, requiredVelZ];        % Required velocity
-    meas = [currentVelZ, currentVelZ, currentVelZ];          % Current velocity
-    u = [ref; meas];
-    
-    zAxisControlActions = lsim(mysysZ, u, t);
-    clear u t ref meas
+        %% Z
+% souhlas
+    if (timeForWaypointPasage(whatWaypoint) - i) > 1
+        requiredVelZ = (quadcopterActualState.BodyXYZPosition.Z - currentWaypoint(3)) / (timeForWaypointPasage(whatWaypoint) - i);
+    else
+        requiredVelZ = 0;
+    end
 
-    Thrust = Mass * g + zAxisControlActions(end);  % Changed minus to plus
+
+    % if ( abs(quadcopterActualState.BodyXYZVelocity.Z) - abs(requiredVelZ) ) < 0.5
+    % t = linspace(0,deltaT, 3);
+    % u = repmat(linspace(quadcopterActualState.BodyXYZVelocity.Z, requiredVelZ,3),2,1);
+    % else
+        t = [0, deltaT];
+        u = repmat([quadcopterActualState.BodyXYZVelocity.Z, requiredVelZ],2,1);
+    % end
+
+    out = lsim(mysysZ, u, t);
+
+    % out(end+1) = 0;
+
+    Thrust = (Mass * g) + out(1) + out(2);
 
     quadcopter.TotalThrustControlAction(Thrust);
 
+    if i == 50 || quadcopterActualState.BodyXYZVelocity.X ~= 0
+        hello = 1;
+    end
 
     %% X
-    currentVelX = quadcopterActualState.BodyXYZVelocity.X;
-    currentPosX = quadcopterActualState.BodyXYZPosition.X;
-    requiredVelX = -(currentWaypoint(1) - currentPosX)/10;
-    t = linspace(0, deltaT, 3);
-
-    ref = [requiredVelX, requiredVelX, requiredVelX];
-    meas = [currentVelX, currentVelX, currentVelX];
-    u = [ref; meas];
+% souhlas
+    if (timeForWaypointPasage(whatWaypoint) - i) > 1
+        requiredVelX = (quadcopterActualState.BodyXYZPosition.X - currentWaypoint(1))/(timeForWaypointPasage(whatWaypoint)-i);
+    else
+        requiredVelX = 0;
+    end
     
-    xAxisControlActions = lsim(mysysX, u, t);
-    clear u t ref meas
+    if ( abs(quadcopterActualState.BodyXYZVelocity.X) - abs(requiredVelX) ) < 0.2
+        t = linspace(0,deltaT, 3);
+        u = repmat(linspace(quadcopterActualState.BodyXYZVelocity.X, requiredVelX, 3),2,1);
+    else
+        t = [0, deltaT];
+        u = repmat([quadcopterActualState.BodyXYZVelocity.X, requiredVelX],2,1);
+    end
 
-    %% Theta
-    currentAngTheta = quadcopterActualState.BodyEulerAngle.Theta;
-    currentAngRateTheta = quadcopterActualState.BodyAngularRate.dTheta;
+    
 
-    requiredAngTheta = (Mass * xAxisControlActions(end)) / Thrust;
-    requiredAngTheta = saturate(requiredAngTheta, limitAngle);
+    out = lsim(mysysX, u, t);
+    out(end + 1) = 0;
 
-    requiredAngRateTheta = -(requiredAngTheta - currentAngTheta)/0.5;
-    t = linspace(0, deltaT, 3);
+    requiredAngTheta = (Mass * (- out(1) - out(2) - out(3))) / Thrust;
+    requiredAngTheta = saturate_value(requiredAngTheta, limitAngle);
 
-    ref = [requiredAngRateTheta, requiredAngRateTheta, requiredAngRateTheta];        % Required velocity
-    meas = [currentAngRateTheta, currentAngRateTheta, currentAngRateTheta];          % Current velocity
-    u = [ref;meas];
+    requiredAngRateTheta = (quadcopterActualState.BodyEulerAngle.Theta - requiredAngTheta)/0.05;
+    requiredAngRateTheta = saturate_value(requiredAngRateTheta,maxAngRate);
+        
+    t = linspace(0,deltaT, 3);
+    u = repmat(linspace(quadcopterActualState.BodyAngularRate.dTheta, requiredAngRateTheta, 3),2,1);
 
-    thetaAxisControlActions = lsim(mysysTheta, u, t);
-    clear u t ref meas
+    out = lsim(mysysTheta, u, t);
+    out(end+1) = 0;
 
-    MomentY = thetaAxisControlActions(end) * quadcopter.physicalParameters.I(1,1);
-    MomentX = 0;
+    MomentY = (out(1) + out(2) + out(3)) * quadcopter.physicalParameters.I(1);
+    MomentY = saturate_value(MomentY,0.001);
 
-    % %% Y
-    % currentVelY = quadcopterActualState.BodyXYZVelocity.Y;
-    % currentPosY = quadcopterActualState.BodyXYZPosition.Y;
-    % requiredVelY = -(currentWaypoint(2) - currentPosY)/10;  % Same time constant as X
-    % t = linspace(0, deltaT, 3);
-    % 
-    % ref = [requiredVelY, requiredVelY, requiredVelY];
-    % meas = [currentVelY, currentVelY, currentVelY];
-    % u = [ref; meas];
-    % 
-    % yAxisControlActions = lsim(mysysY, u, t);
-    % clear u t ref meas
-    % 
-    % %% Phi
-    % currentAngPhi = quadcopterActualState.BodyEulerAngle.Phi;
-    % currentAngRatePhi = quadcopterActualState.BodyAngularRate.dPhi;
-    % 
-    % requiredAngPhi = (Mass * yAxisControlActions(end)) / Thrust;  % Note: no negative here
-    % requiredAngPhi = saturate(requiredAngPhi, limitAngle);
-    % 
-    % requiredAngRatePhi = -(requiredAngPhi - currentAngPhi)/0.5;  % Same time constant as theta
-    % t = linspace(0, deltaT, 3);
-    % 
-    % ref = [requiredAngRatePhi, requiredAngRatePhi, requiredAngRatePhi];
-    % meas = [currentAngRatePhi, currentAngRatePhi, currentAngRatePhi];
-    % u = [ref; meas];
-    % 
-    % phiAxisControlActions = lsim(mysysPhi, u, t);
-    % clear u t ref meas
-    % 
-    % MomentX = phiAxisControlActions(end) * quadcopter.physicalParameters.I(2,2);
+    %% Y
+
+    if (timeForWaypointPasage(whatWaypoint) - i) > 1
+        requiredVelY = (quadcopterActualState.BodyXYZPosition.Y - currentWaypoint(2))/(timeForWaypointPasage(whatWaypoint)-i);
+    else
+        requiredVelY = 0;
+    end
+    
+    if ( abs(quadcopterActualState.BodyXYZVelocity.Y) - abs(requiredVelY) ) < 0.2
+        t = linspace(0,deltaT, 3);
+        u = repmat(linspace(quadcopterActualState.BodyXYZVelocity.Y, requiredVelY, 3),2,1);
+    else
+        t = [0, deltaT];
+        u = repmat([quadcopterActualState.BodyXYZVelocity.Y, requiredVelY],2,1);
+    end
+
+    out = lsim(mysysY, u, t);
+    out(end + 1) = 0;
+
+    requiredAngPhi = (Mass * (out(1) + out(2) + out(3))) / Thrust;
+    requiredAngPhi = saturate_value(requiredAngPhi, limitAngle);
+
+    requiredAngRatePhi = (quadcopterActualState.BodyEulerAngle.Phi - requiredAngPhi)/0.05;
+    requiredAngRatePhi = saturate_value(requiredAngRatePhi,maxAngRate);
+        
+    t = linspace(0,deltaT, 3);
+    u = repmat(linspace(quadcopterActualState.BodyAngularRate.dPhi, requiredAngRatePhi, 3),2,1);
+
+    out = lsim(mysysPhi, u, t);
+    out(end+1) = 0;
+
+    MomentX = (out(1) + out(2) + out(3)) * quadcopter.physicalParameters.I(5);
+    MomentX = saturate_value(MomentX,0.001);
+
 
     quadcopter.AttitudeControlAction(MomentX, MomentY, 0);
 
     %% Visualization
-    % if mod(i,deltaT*speedUp) == 0 || i > 110% the multiplicator of deltaT speeds up the simulation this many times 
+    if mod(i,deltaT*speedUp) == 0 || i > 110% the multiplicator of deltaT speeds up the simulation this many times 
         hold off
         plot3(quadcopterActualState.BodyXYZPosition.X,quadcopterActualState.BodyXYZPosition.Y,quadcopterActualState.BodyXYZPosition.Z,'x',Color="#00FF00")
         hold on
@@ -257,7 +273,7 @@ for i = 0 : deltaT : simulationTime
         disp('Current time is:')
         disp(i)
         clear X Y Z
-    % end
+    end
 
 
 
