@@ -18,9 +18,6 @@ wayPoints = [0 0 -6;        % [X, Y, Z] - waypoint in [m]
 % Position tolerance
 positionTolerance = 0.1;    % [m]
 
-% Gravitational acceleration
-g = 9.81;
-
 % Simulation parameters
 deltaT = 0.01;              % [s]
 simulationTime = max(timeForWaypointPasage) + 20; % [s]
@@ -104,8 +101,7 @@ for i = 1 : deltaT : simulationTime
 
     positionError = targetWaypoint - [state(1), state(3), state(5)];
 
-    [~, x] = ode45(@(t,x) QuadcopterDynamics(t,x,T,M1,M2,M3,g,m,Ix,Iy,Iz), [t t+deltaT], state);
-    
+    [~, x] = ode45(@(t,x) QuadcopterDynamics(t,x,T,M1,M2,M3,g,m,Ix,Iy,Iz), [t t+deltaT], state)
     
 
 
@@ -128,7 +124,7 @@ for i = 1 : deltaT : simulationTime
     % end
     
     % Action for total thrust
-    quadcopter.TotalThrustControlAction(neededThrustInZ);
+    quadcopter.TotalThrustControlAction(100);
     % Action for attitude
     % prvni ovlada smer Y, druhy ovlada smer X, treti ovlada smer Z
     % quadcopter.AttitudeControlAction(Pregulator.Y, Pregulator.X, 0);
