@@ -67,7 +67,7 @@ zAxis.B = [0; g];
 zAxis.C = eye(2);
 zAxis.D = [0;0];
 % Desired poles for the alitutde estimation
-zAxis.poles = [-2+2j, -2-2j];
+zAxis.poles = [-2+0.5j, -2-0.5j];
 Zregulator = configure_observer(zAxis);
 
 % Init the X axis observer (lateral position estimation)
@@ -76,7 +76,7 @@ xAxis.B = [0; 1];
 xAxis.C = eye(2);
 xAxis.D = [0;0];
 % Desired poles for the lateral position estimation
-xAxis.poles = [-2+2j, -2-2j];
+xAxis.poles = [-2+0.5j, -2-0.5j];
 Xregulator = configure_observer(xAxis);
 
 % Init the Y axis observer (longitudinal position estimation)
@@ -85,7 +85,7 @@ yAxis.B = [0; 1];
 yAxis.C = eye(2);
 yAxis.D = [0;0];
 % Desired poles for the longitudinal position estimation
-yAxis.poles = [-2+2j, -2-2j];
+yAxis.poles = [-2+0.5j, -2-0.5j];
 Yregulator = configure_observer(yAxis);
 
 % Init the Phi axis observer (roll angle estimation)
@@ -94,7 +94,7 @@ phiAxis.B = [0; 1];
 phiAxis.C = eye(2);
 phiAxis.D = [0;0];
 % Desired poles for the roll angle estimation
-phiAxis.poles = [-2+2j, -2-2j];
+phiAxis.poles = [-2+0.5j, -2-0.5j];
 Phiregulator = configure_observer(phiAxis);
 
 % Init the Theta axis observer (pitch angle estimation)
@@ -103,7 +103,7 @@ thetaAxis.B = [0; 1];
 thetaAxis.C = eye(2);
 thetaAxis.D = [0;0];
 % Desired poles for the pitch angle estimation
-thetaAxis.poles = [-2+2j, -2-2j];
+thetaAxis.poles = [-2+0.5j, -2-0.5j];
 Thetaregulator = configure_observer(thetaAxis);
 
 % Simulation Configuration
@@ -111,16 +111,16 @@ targetWaypointIndex = 1; % Active navigation waypoint
 targetWaypoint = wayPoints(targetWaypointIndex,:);
 
 % Maximum angle configuration so we are in small angles
-maximumAngle = 0.01;
+maximumAngle = 0.001;
 
 % Init the visualisation
 figure(WindowState="maximized")
 hold on
 grid on
-speedUp = 10;
+speedUp = 5;
 
 % Set the time in which we will be passing the waypoints
-timeToReachWaypoints = timeForWaypointPasage/2;
+timeToReachWaypoints = timeForWaypointPasage;
 
 pause(2)
 
@@ -145,13 +145,13 @@ for currentTime = 1 : deltaT : simulationTime
 
     if (timeToReachWaypoints(targetWaypointIndex) - currentTime) > 1
         targetVerticalVelocity = (quadcopterActualState.BodyXYZPosition.Z - targetWaypoint(3))/...
-                                (timeToReachWaypoints(targetWaypointIndex)-currentTime);
+                        (timeToReachWaypoints(targetWaypointIndex)-currentTime)
     else
         targetVerticalVelocity = 0;
     end
     
-    velocityError = abs(quadcopterActualState.BodyXYZVelocity.Z) - abs(targetVerticalVelocity);
-    if velocityError < 0.5
+    velocityError = quadcopterActualState.BodyXYZVelocity.Z - targetVerticalVelocity;
+    if abs(velocityError) < 0.5
         t = linspace(0, deltaT, 3);
         u = linspace(quadcopterActualState.BodyXYZVelocity.Z, targetVerticalVelocity, 3);
     else
@@ -189,7 +189,11 @@ for currentTime = 1 : deltaT : simulationTime
     t = linspace(0, deltaT, 3);
     u = linspace(quadcopterActualState.BodyAngularRate.dPhi, rollRateReference, 3);
     rollResponse = lsim(Phiregulator, u, t);
-    momentX = rollResponse(end) * quadcopter.physicalParameters.I(5);
+    momentY = rollResponse(end) * quadcopter.physicalParameters.I(5);
+
+    if currentTime == 111
+        do = 5;
+    end
 
     % Y axis control (longitudinal position)
 
@@ -217,7 +221,7 @@ for currentTime = 1 : deltaT : simulationTime
     t = linspace(0, deltaT, 3);
     u = linspace(quadcopterActualState.BodyAngularRate.dTheta, pitchRateReference, 3);
     pitchResponse = lsim(Thetaregulator, u, t);
-    momentY = pitchResponse(end) * quadcopter.physicalParameters.I(1);
+    momentX = pitchResponse(end) * quadcopter.physicalParameters.I(1);
 
 
     %% Regulator control actions
@@ -239,6 +243,7 @@ for currentTime = 1 : deltaT : simulationTime
         pause(0.00001)
         disp('Current time is:')
         disp(currentTime)
+        clear X Y Z
     end
 
     
