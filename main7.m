@@ -2,7 +2,7 @@ clc, clear, clf, close, format compact;
 
 %% Instructions
 % At these times, the quadcopter must pass the appropriate waypoint
-timeForWaypointPasage = [0,220,330,440,550]; % [s]
+timeForWaypointPasage = [110,220,330,440,550]; % [s]
 
 % Waypoints - these points must be flown by quadcopter
 wayPoints = [0 0 -6;        % [X, Y, Z] - waypoint in [m]
@@ -68,7 +68,7 @@ zAxis.B = [0; g];
 zAxis.C = eye(2);
 zAxis.D = [0; 0];
 
-zAxis.poles = [complex(-4,5), complex(-4,-5)];  % Much more aggressive controller
+zAxis.poles = [complex(-4,2), complex(-4,-2)];  % Much more aggressive controller
 
 mysysZ = configure_observer(zAxis);
 
@@ -80,6 +80,7 @@ xAxis.C = eye(2);
 xAxis.D = [0; 0];
 
 xAxis.poles = [complex(-4,1), complex(-4,-1)];
+% xAxis.poles = [-4,-3];
 
 mysysX = configure_observer(xAxis);
 
@@ -91,6 +92,7 @@ yAxis.C = eye(2);
 yAxis.D = [0; 0];
 
 yAxis.poles = [complex(-4,1), complex(-4,-1)];
+% yAxis.poles = [-4,-3];
 
 mysysY = configure_observer(yAxis);
 
@@ -102,6 +104,7 @@ phiAxis.C = eye(2);
 phiAxis.D = [0; 0];
 
 phiAxis.poles = [complex(-4,1), complex(-4,-1)];
+% phiAxis.poles = [-4,-3];
 
 mysysPhi = configure_observer(phiAxis);
 
@@ -113,6 +116,7 @@ thetaAxis.C = eye(2);
 thetaAxis.D = [0; 0];
 
 thetaAxis.poles = [complex(-4, 1), complex(-4, -1)];
+% thetaAxis.poles = [-3,-4];
 
 mysysTheta = configure_observer(thetaAxis);
 
@@ -136,7 +140,7 @@ maxAngRate = limitAngle/0.05; % Match 0.05s time constant from your code
 figure(WindowState="maximized")
 hold on
 grid on
-speedUp = 100;
+speedUp = 5;
 
 pause(2)
 %% Simulation
@@ -154,11 +158,11 @@ for i = 0 : deltaT : simulationTime
 
     % Get actual state of quadcopter
     quadcopterActualState = quadcopter.GetState();
-    disp(quadcopterActualState.BodyAngularRate)
-    disp(quadcopterActualState.BodyEulerAngle)
-    disp(quadcopterActualState.BodyXYZPosition)
-    disp('velocity:')
-    disp(quadcopterActualState.BodyXYZVelocity)
+    % disp(quadcopterActualState.BodyAngularRate)
+    % disp(quadcopterActualState.BodyEulerAngle)
+    % disp(quadcopterActualState.BodyXYZPosition)
+    % disp('velocity:')
+    % disp(quadcopterActualState.BodyXYZVelocity)
     
     %% Z
     currentPosZ = quadcopterActualState.BodyXYZPosition.Z;
@@ -218,49 +222,55 @@ for i = 0 : deltaT : simulationTime
 
     MomentY = thetaAxisControlActions(end) * quadcopter.physicalParameters.I(1,1); 
 
-    % %% Y
-    % currentVelY = quadcopterActualState.BodyXYZVelocity.Y;
-    % currentPosY = quadcopterActualState.BodyXYZPosition.Y;
-    % requiredVelY = -(currentWaypoint(2) - currentPosY)/10;  % Same time constant as X
-    % t = linspace(0, deltaT, 3);
-    % 
-    % ref = [requiredVelY, requiredVelY, requiredVelY];
-    % meas = [currentVelY, currentVelY, currentVelY];
-    % u = [ref; meas];
-    % 
-    % yAxisControlActions = lsim(mysysY, u, t);
-    % clear u t ref meas
-    % 
-    % %% Phi
-    % currentAngPhi = quadcopterActualState.BodyEulerAngle.Phi;
-    % currentAngRatePhi = quadcopterActualState.BodyAngularRate.dPhi;
-    % 
-    % requiredAngPhi = (Mass * yAxisControlActions(end)) / Thrust;  % Note: no negative here
-    % requiredAngPhi = saturate(requiredAngPhi, limitAngle);
-    % 
-    % requiredAngRatePhi = -(requiredAngPhi - currentAngPhi)/0.5;  % Same time constant as theta
-    % t = linspace(0, deltaT, 3);
-    % 
-    % ref = [requiredAngRatePhi, requiredAngRatePhi, requiredAngRatePhi];
-    % meas = [currentAngRatePhi, currentAngRatePhi, currentAngRatePhi];
-    % u = [ref; meas];
-    % 
-    % phiAxisControlActions = lsim(mysysPhi, u, t);
-    % clear u t ref meas
-    % 
-    % MomentX = phiAxisControlActions(end) * quadcopter.physicalParameters.I(2,2);
+    %% Y
+    currentVelY = quadcopterActualState.BodyXYZVelocity.Y;
+    currentPosY = quadcopterActualState.BodyXYZPosition.Y;
+    if (timeForWaypointPasage(whatWaypoint) - i) > 1
+        requiredVelY = (quadcopterActualState.BodyXYZPosition.Y - currentWaypoint(2))/(timeForWaypointPasage(whatWaypoint)-i);
+    else
+        requiredVelY = 0;
+    end
+    t = linspace(0, deltaT, 3);
+    
+    ref = [requiredVelY, requiredVelY, requiredVelY];
+    meas = [currentVelY, currentVelY, currentVelY];
+    u = [ref; meas];
+        
+    yAxisControlActions = lsim(mysysY, u, t);
+    clear u t ref meas
+    
+    %% Phi
+    currentAngPhi = quadcopterActualState.BodyEulerAngle.Phi;
+    currentAngRatePhi = quadcopterActualState.BodyAngularRate.dPhi;
+    
+    requiredAngPhi = -(Mass * yAxisControlActions(end)) / Thrust;  % Add negative sign
+    requiredAngPhi = saturate(requiredAngPhi, limitAngle);
+    
+    requiredAngRatePhi = (currentAngPhi - requiredAngPhi)/0.5;
+    t = linspace(0, deltaT, 3);
+    
+    ref = [requiredAngRatePhi, requiredAngRatePhi, requiredAngRatePhi];        % Required velocity
+    meas = [currentAngRatePhi, currentAngRatePhi, currentAngRatePhi];          % Current velocity
+    u = [ref;meas];
+    
+    phiAxisControlActions = -lsim(mysysPhi, u, t);
+    clear u t ref meas
+    
+    MomentX = phiAxisControlActions(end) * quadcopter.physicalParameters.I(1,1);
 
     quadcopter.AttitudeControlAction(MomentX, MomentY, 0);
 
     %% Visualization
     if mod(i,deltaT*speedUp) == 0 % the multiplicator of deltaT speeds up the simulation this many times 
+        subplot(2,2,1)
         hold off
         plot3(quadcopterActualState.BodyXYZPosition.X,quadcopterActualState.BodyXYZPosition.Y,quadcopterActualState.BodyXYZPosition.Z,'x',Color="#00FF00")
         hold on
         [X,Y] = meshgrid(-0.5:0.1:4,-0.5:0.1:1.5);
         Z = zeros(size(X));
         plot3(X,Y,Z,'k.')
-        plot3(wayPoints(:,1),wayPoints(:,2),wayPoints(:,3),'r-')
+        plot3(wayPoints(:,1),wayPoints(:,2),wayPoints(:,3),'r-o')
+        title('3D view')
         xlabel('x')
         ylabel('y')
         zlabel('z')
@@ -268,12 +278,43 @@ for i = 0 : deltaT : simulationTime
         disp(i)
         clear X Y Z
         pause(0.00001)
-    end
 
-    % Vizualizace v x ose
-        % hold on
-        % plot(i,quadcopterActualState.BodyXYZPosition.X, '.k')
-        % pause(0.00001)
+        % Visualization graphs for each axis
+        subplot(2,2,2)
+        title('X axis view')
+        xlabel('Time step')
+        ylabel('Position X [m]')
+        if abs(currentPosX - currentWaypoint(1)) < positionTolerance
+            plot(i, currentPosX, '.g', MarkerSize=12)
+        else
+            plot(i, currentPosX, '.k')
+        end
+        hold on
+        
+        subplot(2,2,3)
+        title('Y axis view')
+        xlabel('Time step')
+        ylabel('Position Y [m]')
+        if abs(currentPosY - currentWaypoint(2)) < positionTolerance
+            plot(i, currentPosY, '.g', MarkerSize=12)
+        else
+            plot(i, currentPosY, '.k')
+        end
+        hold on
+        
+        subplot(2,2,4)
+        title('Z axis')
+        xlabel('Time step')
+        ylabel('Position Z [m]')
+        if abs(currentPosZ - currentWaypoint(3)) < positionTolerance
+            plot(i, currentPosZ, '.g', MarkerSize=12)
+        else
+            plot(i, currentPosZ, '.k')
+        end
+        hold on
+
+        pause(0.00001)
+    end
 
 
 
