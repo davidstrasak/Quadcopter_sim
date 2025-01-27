@@ -1,4 +1,6 @@
 function stateSpace = configure_observer(axisObj)
+%Function that configures a full state observer based on A,B,C and D
+%matrixes and outputs the regulator that it creates
     arguments
         axisObj (1,1) struct
     end

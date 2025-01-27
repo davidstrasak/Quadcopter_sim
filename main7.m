@@ -287,9 +287,20 @@ for timeStep = 0 : deltaT : simulationTime
 
     %% Safety checks
     
-    % Safety check for ground collision
+    % Crash Check
     if (currentState.BodyXYZPosition.Z >= 0)
-        close
+        msgbox('Quadcopter Crashed!', 'Error', 'error');
+        break;
+    end
+
+    % Waypoint check
+    if (~CheckWayPointTrack(...
+                currentState.BodyXYZPosition,...
+                timeStep * deltaT,...
+                timeForWaypointPassage,...
+                wayPoints,...
+                positionTolerance))
+        msgbox('Quadcopter did not passed waypoint', 'Error', 'error');
         break;
     end
 end

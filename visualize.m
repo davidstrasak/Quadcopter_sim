@@ -1,4 +1,5 @@
 function [] = visualize(input)
+% Function that visualizes the outputs of the quadcopter calculations
 arguments
     input (1,1) struct
 end
