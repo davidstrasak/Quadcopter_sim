@@ -2,7 +2,7 @@ clc, clear, clf, close, format compact;
 
 %% Instructions
 % At these times, the quadcopter must pass the appropriate waypoint
-timeForWaypointPasage = [110,220,330,440,550]; % [s]
+timeForWaypointPassage = [110,220,330,440,550]; % [s]
 
 % Waypoints - these points must be flown by quadcopter
 wayPoints = [0 0 -6;        % [X, Y, Z] - waypoint in [m]
@@ -14,9 +14,9 @@ wayPoints = [0 0 -6;        % [X, Y, Z] - waypoint in [m]
 positionTolerance = 0.1;    % [m]
 
 % Simulation parameters
-% deltaT = 0.01;              % [s]
-deltaT = 0.1;              % [s]
-simulationTime = max(timeForWaypointPasage) + 20; % [s]
+deltaT = 0.01;              % [s]
+% deltaT = 0.1;              % [s]
+simulationTime = max(timeForWaypointPassage) + 20; % [s]
 
 % Constants
 % Radians to degree
@@ -58,319 +58,238 @@ quadcopter = Quadcopter(Mass, ...
                deltaT);
 
 %% Init the rest of variables
+% Get gravity constant from quadcopter model
+grav = quadcopter.g;
 
-g = quadcopter.g;
+%% Vertical dynamics
+% State space model for altitude control
+% States: [position; velocity]
+% A matrix represents natural system dynamics
+vertDyn.A = [0 1; 0 0];
+% B matrix includes gravity compensation for hover
+vertDyn.B = [0; grav];
+% Full state feedback
+vertDyn.C = eye(2);
+vertDyn.D = [0; 0];
 
-%% Z axis SS
+% Complex poles for better damping characteristics
+% Imaginary parts create oscillatory response with controlled overshoot
+vertDyn.poles = [-4+2j, -4-2j];
 
-zAxis.A = [0 1; 0 0];
-zAxis.B = [0; g];
-zAxis.C = eye(2);
-zAxis.D = [0; 0];
+altitudeController = configure_observer(vertDyn);
 
-zAxis.poles = [complex(-4,2), complex(-4,-2)];  % Much more aggressive controller
+%% Longitudinal dynamics (X-axis motion)
+% Similar structure to vertical dynamics but without gravity term
+% This controller generates desired longitudinal acceleration which is
+% passed on to the pitch control
+longDyn.A = [0 1; 0 0];
+longDyn.B = [0; 1];
+longDyn.C = eye(2);
+longDyn.D = [0; 0];
 
-mysysZ = configure_observer(zAxis);
+% Slightly less aggressive poles than vertical control
+longDyn.poles = [-4+1j, -4-1j];
 
-%% X axis
+forwardController = configure_observer(longDyn);
 
-xAxis.A = [0 1; 0 0];
-xAxis.B = [0; 1];
-xAxis.C = eye(2);
-xAxis.D = [0; 0];
+%% Lateral dynamics (Y-axis motion)
+% Identical to longitudinal dynamics due to quadcopter symmetry
+% This controller generates desired lateral acceleration which is passed on
+% to roll control
+latDyn.A = [0 1; 0 0];
+latDyn.B = [0; 1];
+latDyn.C = eye(2);
+latDyn.D = [0; 0];
 
-xAxis.poles = [complex(-4,1), complex(-4,-1)];
-% xAxis.poles = [-4,-3];
+latDyn.poles = [-4+1j,-4-1j];
 
-mysysX = configure_observer(xAxis);
+sideController = configure_observer(latDyn);
 
-%% Y axis
+%% Roll dynamics
+% Angular motion control for roll axis
+% States: [angle; angular_rate]
+rollDyn.A = [0 1; 0 0];
+rollDyn.B = [0; 1];
+rollDyn.C = eye(2);
+rollDyn.D = [0; 0];
 
-yAxis.A = [0 1; 0 0];
-yAxis.B = [0; 1];
-yAxis.C = eye(2);
-yAxis.D = [0; 0];
+rollDyn.poles = [-4+1j,-4-1j];
 
-yAxis.poles = [complex(-4,1), complex(-4,-1)];
-% yAxis.poles = [-4,-3];
+rollController = configure_observer(rollDyn);
 
-mysysY = configure_observer(yAxis);
+%% Pitch dynamics
+% Similar to roll due to quadcopter symmetry
+pitchDyn.A = [0 1; 0 0];
+pitchDyn.B = [0; 1];
+pitchDyn.C = eye(2);
+pitchDyn.D = [0; 0];
 
-%% Phi
+pitchDyn.poles = [-4+1j,-4-1j];
 
-phiAxis.A = [0 1; 0 0];
-phiAxis.B = [0; 1];
-phiAxis.C = eye(2);
-phiAxis.D = [0; 0];
-
-phiAxis.poles = [complex(-4,1), complex(-4,-1)];
-% phiAxis.poles = [-4,-3];
-
-mysysPhi = configure_observer(phiAxis);
-
-%% Theta
-
-thetaAxis.A = [0 1; 0 0];
-thetaAxis.B = [0; 1];
-thetaAxis.C = eye(2);
-thetaAxis.D = [0; 0];
-
-thetaAxis.poles = [complex(-4, 1), complex(-4, -1)];
-% thetaAxis.poles = [-3,-4];
-
-mysysTheta = configure_observer(thetaAxis);
+pitchController = configure_observer(pitchDyn);
 
 %% Simulation variables
+% Waypoint tracking variables
+currentTarget = 1;
+targetPoint = wayPoints(currentTarget,:);
 
-% starting waypoint
-whatWaypoint = 1;
+% Safety limits for attitude control
+angleLimit = 0.01;    % Maximum allowed tilt angle (radians)
 
-% set current waypoint 
-currentWaypoint = wayPoints(whatWaypoint,:);
-
-% data storage variables
-tracking_FPS = 4;       % 4 Hz, that is 0.25 s (1/FPS)
-y = 1;                  % index for data storage 
-
-% saturation limit
-limitAngle = 0.01;
-maxAngRate = limitAngle/0.05; % Match 0.05s time constant from your code
-
-% Init the visualization
+% Setup visualization
 figure(WindowState="maximized")
 hold on
 grid on
-speedUp = 5;
+speedUp = 50;  % Simulation speedup factor
 
 pause(2)
-%% Simulation
-for i = 0 : deltaT : simulationTime
-    %% Update states of simulation
 
-    % Change waypoint once time passes
-    if (i < timeForWaypointPasage(end) && i > timeForWaypointPasage(whatWaypoint))
-        whatWaypoint = whatWaypoint + 1;
-        currentWaypoint = wayPoints(whatWaypoint,:);
+%% Main control loop
+for timeStep = 0 : deltaT : simulationTime
+    %% Update states of simulation
+    % Check if it's time to switch to next waypoint based on predefined timing
+    if (timeStep < timeForWaypointPassage(end) && timeStep > timeForWaypointPassage(currentTarget))
+        currentTarget = currentTarget + 1;
+        targetPoint = wayPoints(currentTarget,:);
     end    
 
-    % Update state of quadcopter
+    % Get latest state from quadcopter dynamics simulation
     quadcopter.UpdateState();
-
-    % Get actual state of quadcopter
-    quadcopterActualState = quadcopter.GetState();
-    % disp(quadcopterActualState.BodyAngularRate)
-    % disp(quadcopterActualState.BodyEulerAngle)
-    % disp(quadcopterActualState.BodyXYZPosition)
-    % disp('velocity:')
-    % disp(quadcopterActualState.BodyXYZVelocity)
+    currentState = quadcopter.GetState();
     
-    %% Z
-    currentPosZ = quadcopterActualState.BodyXYZPosition.Z;
-    currentVelZ = quadcopterActualState.BodyXYZVelocity.Z;
-    if (timeForWaypointPasage(whatWaypoint) - i) > 1
-        requiredVelZ = (quadcopterActualState.BodyXYZPosition.Z - currentWaypoint(3))/(timeForWaypointPasage(whatWaypoint)-i);
+    %% Altitude control
+    % Extract current vertical states
+    altitudeCurrent = currentState.BodyXYZPosition.Z;
+    verticalSpeed = currentState.BodyXYZVelocity.Z;
+    
+    % Calculate required vertical velocity using time-to-go
+    % This creates a velocity profile that gets drone to target by specified time
+    if (timeForWaypointPassage(currentTarget) - timeStep) > 1
+        targetVertSpeed = (currentState.BodyXYZPosition.Z - targetPoint(3))/...
+                         (timeForWaypointPassage(currentTarget)-timeStep);
     else
-        requiredVelZ = 0;
+        targetVertSpeed = 0;  % So we are not trying to divide by 0
     end
-    t = linspace(0, deltaT, 3);   
     
-    ref = [requiredVelZ, requiredVelZ, requiredVelZ];        % Required velocity
-    meas = [currentVelZ, currentVelZ, currentVelZ];          % Current velocity
-    u = [ref; meas];
+    % Setup control input for altitude controller
+    timeVec = linspace(0, deltaT, 3);   
+    % Replicate commands for continuous control simulation
+    refAlt = [targetVertSpeed, targetVertSpeed, targetVertSpeed];
+    measAlt = [verticalSpeed, verticalSpeed, verticalSpeed];
+    inputAlt = [refAlt; measAlt];
     
-    zAxisControlActions = lsim(mysysZ, u, t);
-    clear u t ref meas
+    % Generate thrust correction from controller
+    altitudeCommand = lsim(altitudeController, inputAlt, timeVec);
+    
+    % Total thrust = hover thrust (mg) + correction
+    thrustCommand = Mass * grav + altitudeCommand(end);
+    quadcopter.TotalThrustControlAction(thrustCommand);
 
-    Thrust = Mass * g + zAxisControlActions(end);  % Changed minus to plus
-
-    quadcopter.TotalThrustControlAction(Thrust);
-
-
-    %% X
-    currentVelX = quadcopterActualState.BodyXYZVelocity.X;
-    currentPosX = quadcopterActualState.BodyXYZPosition.X;
-    if (timeForWaypointPasage(whatWaypoint) - i) > 1
-        requiredVelX = (quadcopterActualState.BodyXYZPosition.X - currentWaypoint(1))/(timeForWaypointPasage(whatWaypoint)-i);
+    %% Forward control (X-axis)
+    % Similar structure to altitude control but for horizontal motion
+    forwardSpeed = currentState.BodyXYZVelocity.X;
+    forwardPos = currentState.BodyXYZPosition.X;
+    
+    % Time-based velocity profile for X direction
+    if (timeForWaypointPassage(currentTarget) - timeStep) > 1
+        targetForwardSpeed = (currentState.BodyXYZPosition.X - targetPoint(1))/...
+                            (timeForWaypointPassage(currentTarget)-timeStep);
     else
-        requiredVelX = 0;
+        targetForwardSpeed = 0; % So we are not trying to divide by 0
     end
-    t = linspace(0, deltaT, 3);
-
-    ref = [requiredVelX, requiredVelX, requiredVelX];
-    meas = [currentVelX, currentVelX, currentVelX];
-    u = [ref; meas];
     
-    xAxisControlActions = lsim(mysysX, u, t);
-    clear u t ref meas
+    timeVec = linspace(0, deltaT, 3);
+    refFwd = [targetForwardSpeed, targetForwardSpeed, targetForwardSpeed];
+    measFwd = [forwardSpeed, forwardSpeed, forwardSpeed];
+    inputFwd = [refFwd; measFwd];
+    
+    forwardCommand = lsim(forwardController, inputFwd, timeVec);
 
-    %% Theta
-    currentAngTheta = quadcopterActualState.BodyEulerAngle.Theta;
-    currentAngRateTheta = quadcopterActualState.BodyAngularRate.dTheta;
+    %% Pitch control
+    % Cascade control: output of position controller becomes pitch reference
+    pitchAngle = currentState.BodyEulerAngle.Theta;
+    pitchRate = currentState.BodyAngularRate.dTheta;
 
-    requiredAngTheta = (Mass * xAxisControlActions(end)) / Thrust;  % Add negative sign
-    requiredAngTheta = saturate(requiredAngTheta, limitAngle);
+    % Convert linear acceleration command to pitch angle
+    % Using small angle approximation: ax = g*theta
+    targetPitch = (Mass * forwardCommand(end)) / thrustCommand;
+    targetPitch = saturate(targetPitch, angleLimit);  % Safety limit
 
-    requiredAngRateTheta = (currentAngTheta - requiredAngTheta)/0.5;
-    t = linspace(0, deltaT, 3);
+    % Calculate required pitch rate for smooth transition
+    targetPitchRate = (pitchAngle - targetPitch)/0.5;  % 0.5s time constant
+    timeVec = linspace(0, deltaT, 3);
 
-    ref = [requiredAngRateTheta, requiredAngRateTheta, requiredAngRateTheta];        % Required velocity
-    meas = [currentAngRateTheta, currentAngRateTheta, currentAngRateTheta];          % Current velocity
-    u = [ref;meas];
+    refPitch = [targetPitchRate, targetPitchRate, targetPitchRate];
+    measPitch = [pitchRate, pitchRate, pitchRate];
+    inputPitch = [refPitch; measPitch];
 
-    thetaAxisControlActions = -lsim(mysysTheta, u, t);
-    clear u t ref meas
+    pitchCommand = -lsim(pitchController, inputPitch, timeVec);
 
-    MomentY = thetaAxisControlActions(end) * quadcopter.physicalParameters.I(1,1); 
+    % Convert to physical moment using inertia
+    pitchMoment = pitchCommand(end) * quadcopter.physicalParameters.I(1,1);
 
-    %% Y
-    currentVelY = quadcopterActualState.BodyXYZVelocity.Y;
-    currentPosY = quadcopterActualState.BodyXYZPosition.Y;
-    if (timeForWaypointPasage(whatWaypoint) - i) > 1
-        requiredVelY = (quadcopterActualState.BodyXYZPosition.Y - currentWaypoint(2))/(timeForWaypointPasage(whatWaypoint)-i);
+    %% Lateral control (Y-axis)
+    % Mirror of forward control but for sideways motion
+    lateralSpeed = currentState.BodyXYZVelocity.Y;
+    lateralPos = currentState.BodyXYZPosition.Y;
+    
+    if (timeForWaypointPassage(currentTarget) - timeStep) > 1
+        targetLateralSpeed = (currentState.BodyXYZPosition.Y - targetPoint(2))/...
+                            (timeForWaypointPassage(currentTarget)-timeStep);
     else
-        requiredVelY = 0;
+        targetLateralSpeed = 0; % So we are not trying to divide by 0
     end
-    t = linspace(0, deltaT, 3);
     
-    ref = [requiredVelY, requiredVelY, requiredVelY];
-    meas = [currentVelY, currentVelY, currentVelY];
-    u = [ref; meas];
-        
-    yAxisControlActions = lsim(mysysY, u, t);
-    clear u t ref meas
+    timeVec = linspace(0, deltaT, 3);
+    refLat = [targetLateralSpeed, targetLateralSpeed, targetLateralSpeed];
+    measLat = [lateralSpeed, lateralSpeed, lateralSpeed];
+    inputLat = [refLat; measLat];
     
-    %% Phi
-    currentAngPhi = quadcopterActualState.BodyEulerAngle.Phi;
-    currentAngRatePhi = quadcopterActualState.BodyAngularRate.dPhi;
-    
-    requiredAngPhi = -(Mass * yAxisControlActions(end)) / Thrust;  % Add negative sign
-    requiredAngPhi = saturate(requiredAngPhi, limitAngle);
-    
-    requiredAngRatePhi = (currentAngPhi - requiredAngPhi)/0.5;
-    t = linspace(0, deltaT, 3);
-    
-    ref = [requiredAngRatePhi, requiredAngRatePhi, requiredAngRatePhi];        % Required velocity
-    meas = [currentAngRatePhi, currentAngRatePhi, currentAngRatePhi];          % Current velocity
-    u = [ref;meas];
-    
-    phiAxisControlActions = -lsim(mysysPhi, u, t);
-    clear u t ref meas
-    
-    MomentX = phiAxisControlActions(end) * quadcopter.physicalParameters.I(1,1);
+    lateralCommand = lsim(sideController, inputLat, timeVec);
 
-    quadcopter.AttitudeControlAction(MomentX, MomentY, 0);
+    %% Roll control
+    % Cascade control: lateral position controller output becomes roll reference
+    rollAngle = currentState.BodyEulerAngle.Phi;
+    rollRate = currentState.BodyAngularRate.dPhi;
+    
+    % Convert lateral acceleration command to roll angle
+    % Negative sign due to coordinate system convention
+    targetRoll = -(Mass * lateralCommand(end)) / thrustCommand;
+    targetRoll = saturate(targetRoll, angleLimit);
+    
+    targetRollRate = (rollAngle - targetRoll)/0.5;
+    timeVec = linspace(0, deltaT, 3);
+    
+    refRoll = [targetRollRate, targetRollRate, targetRollRate];
+    measRoll = [rollRate, rollRate, rollRate];
+    inputRoll = [refRoll; measRoll];
+    
+    rollCommand = -lsim(rollController, inputRoll, timeVec);
+    
+    rollMoment = rollCommand(end) * quadcopter.physicalParameters.I(1,1);
+
+    % Apply computed control moments
+    quadcopter.AttitudeControlAction(rollMoment, pitchMoment, 0);
 
     %% Visualization
-    if mod(i,deltaT*speedUp) == 0 % the multiplicator of deltaT speeds up the simulation this many times 
-        subplot(2,2,1)
-        hold off
-        plot3(quadcopterActualState.BodyXYZPosition.X,quadcopterActualState.BodyXYZPosition.Y,quadcopterActualState.BodyXYZPosition.Z,'x',Color="#00FF00")
-        hold on
-        [X,Y] = meshgrid(-0.5:0.1:4,-0.5:0.1:1.5);
-        Z = zeros(size(X));
-        plot3(X,Y,Z,'k.')
-        plot3(wayPoints(:,1),wayPoints(:,2),wayPoints(:,3),'r-o')
-        title('3D view')
-        xlabel('x')
-        ylabel('y')
-        zlabel('z')
-        disp('Current time is:')
-        disp(i)
-        clear X Y Z
-        pause(0.00001)
+    vizInput = struct();
+    vizInput.timeStep = timeStep;
+    vizInput.deltaT = deltaT;
+    vizInput.speedUp = speedUp;
+    vizInput.currentState = currentState;
+    vizInput.wayPoints = wayPoints;
+    vizInput.targetPoint = targetPoint;
+    vizInput.positionTolerance = positionTolerance;
+    vizInput.forwardPos = forwardPos;
+    vizInput.lateralPos = lateralPos;
+    vizInput.altitudeCurrent = altitudeCurrent;
+    visualize(vizInput);
 
-        % Visualization graphs for each axis
-        subplot(2,2,2)
-        title('X axis view')
-        xlabel('Time step')
-        ylabel('Position X [m]')
-        if abs(currentPosX - currentWaypoint(1)) < positionTolerance
-            plot(i, currentPosX, '.g', MarkerSize=12)
-        else
-            plot(i, currentPosX, '.k')
-        end
-        hold on
-        
-        subplot(2,2,3)
-        title('Y axis view')
-        xlabel('Time step')
-        ylabel('Position Y [m]')
-        if abs(currentPosY - currentWaypoint(2)) < positionTolerance
-            plot(i, currentPosY, '.g', MarkerSize=12)
-        else
-            plot(i, currentPosY, '.k')
-        end
-        hold on
-        
-        subplot(2,2,4)
-        title('Z axis')
-        xlabel('Time step')
-        ylabel('Position Z [m]')
-        if abs(currentPosZ - currentWaypoint(3)) < positionTolerance
-            plot(i, currentPosZ, '.g', MarkerSize=12)
-        else
-            plot(i, currentPosZ, '.k')
-        end
-        hold on
-
-        pause(0.00001)
-    end
-
-
-
-    % %% Tracking - only for later use for plotting
-    % 
-    % % mod(i, 0.25) ensures that only data is recorded at 4 Hz, can be lower
-    % if (mod(i, (1/tracking_FPS) ) == 0)
-    %     trackDroneXYZPosition(1,y) = quadcopterActualState.BodyXYZPosition.X;
-    %     trackDroneXYZPosition(2,y) = quadcopterActualState.BodyXYZPosition.Y;
-    %     trackDroneXYZPosition(3,y) = quadcopterActualState.BodyXYZPosition.Z;
-    % 
-    %     trackDroneXYZVelocity(1,y) = quadcopterActualState.BodyXYZVelocity.X;
-    %     trackDroneXYZVelocity(2,y) = quadcopterActualState.BodyXYZVelocity.Y;
-    %     trackDroneXYZVelocity(3,y) = quadcopterActualState.BodyXYZVelocity.Z;
-    % 
-    %     trackDroneAngularRate(1,y) = quadcopterActualState.BodyAngularRate.dPhi;
-    %     trackDroneAngularRate(2,y) = quadcopterActualState.BodyAngularRate.dTheta;
-    %     trackDroneAngularRate(3,y) = quadcopterActualState.BodyAngularRate.dPsi;
-    % 
-    %     trackDroneXYZMoment(1,y) = MomentX;
-    %     trackDroneXYZMoment(2,y) = MomentY;
-    %     trackDroneXYZMoment(3,y) = 0;
-    % 
-    %     trackDroneAngle(1,y) = quadcopterActualState.BodyEulerAngle.Phi;
-    %     trackDroneAngle(2,y) = quadcopterActualState.BodyEulerAngle.Theta;
-    % 
-    %     trackWaypoint(:,y) = currentWaypoint;
-    % 
-    %     trackThrust(y) = Thrust;
-    %     trackTime(y) = i;
-    %     y = y + 1;
-    % end
+    %% Safety checks
     
-    % Crash check
-    if (quadcopterActualState.BodyXYZPosition.Z >= 0)
-        % msgbox('Quadcopter Crashed!', 'Error', 'error');
+    % Safety check for ground collision
+    if (currentState.BodyXYZPosition.Z >= 0)
         close
         break;
     end
-
-    % % Waypoint check
-    % if (~CheckWayPointTrack(...
-    %             quadcopterActualState.BodyXYZPosition,...
-    %             i,...
-    %             timeForWaypointPasage,...
-    %             currentWaypoint,...
-    %             positionTolerance))
-    %     msgbox('Quadcopter did not pass waypoint', 'Error', 'error')
-    %     disp(i);
-    %     disp(timeForWaypointPasage(whatWaypoint));
-    %     disp(positionTolerance);
-    %     disp(quadcopterActualState.BodyXYZPosition)
-    %     break;
-    % end
 end
-
-% plot_data(trackTime, trackThrust, ...
-%     trackDroneXYZPosition, trackDroneXYZVelocity, trackDroneXYZMoment, ...
-%     trackDroneAngle, trackDroneAngularRate, trackWaypoint)
