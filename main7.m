@@ -2,7 +2,7 @@ clc, clear, clf, close, format compact;
 
 %% Instructions
 % At these times, the quadcopter must pass the appropriate waypoint
-timeForWaypointPasage = [0,220,330,440,550]/11; % [s]
+timeForWaypointPasage = [0,220,330,440,550]; % [s]
 
 % Waypoints - these points must be flown by quadcopter
 wayPoints = [0 0 -6;        % [X, Y, Z] - waypoint in [m]
@@ -137,7 +137,6 @@ figure(WindowState="maximized")
 hold on
 grid on
 speedUp = 100;
-settleTime = 10;
 
 pause(2)
 %% Simulation
@@ -155,11 +154,20 @@ for i = 0 : deltaT : simulationTime
 
     % Get actual state of quadcopter
     quadcopterActualState = quadcopter.GetState();
+    disp(quadcopterActualState.BodyAngularRate)
+    disp(quadcopterActualState.BodyEulerAngle)
+    disp(quadcopterActualState.BodyXYZPosition)
+    disp('velocity:')
+    disp(quadcopterActualState.BodyXYZVelocity)
     
     %% Z
     currentPosZ = quadcopterActualState.BodyXYZPosition.Z;
     currentVelZ = quadcopterActualState.BodyXYZVelocity.Z;
-    requiredVelZ = -(currentWaypoint(3) - currentPosZ)/settleTime;
+    if (timeForWaypointPasage(whatWaypoint) - i) > 1
+        requiredVelZ = (quadcopterActualState.BodyXYZPosition.Z - currentWaypoint(3))/(timeForWaypointPasage(whatWaypoint)-i);
+    else
+        requiredVelZ = 0;
+    end
     t = linspace(0, deltaT, 3);   
     
     ref = [requiredVelZ, requiredVelZ, requiredVelZ];        % Required velocity
@@ -177,7 +185,11 @@ for i = 0 : deltaT : simulationTime
     %% X
     currentVelX = quadcopterActualState.BodyXYZVelocity.X;
     currentPosX = quadcopterActualState.BodyXYZPosition.X;
-    requiredVelX = -(currentWaypoint(1) - currentPosX)/10;
+    if (timeForWaypointPasage(whatWaypoint) - i) > 1
+        requiredVelX = (quadcopterActualState.BodyXYZPosition.X - currentWaypoint(1))/(timeForWaypointPasage(whatWaypoint)-i);
+    else
+        requiredVelX = 0;
+    end
     t = linspace(0, deltaT, 3);
 
     ref = [requiredVelX, requiredVelX, requiredVelX];
@@ -191,21 +203,20 @@ for i = 0 : deltaT : simulationTime
     currentAngTheta = quadcopterActualState.BodyEulerAngle.Theta;
     currentAngRateTheta = quadcopterActualState.BodyAngularRate.dTheta;
 
-    requiredAngTheta = (Mass * xAxisControlActions(end)) / Thrust;
+    requiredAngTheta = (Mass * xAxisControlActions(end)) / Thrust;  % Add negative sign
     requiredAngTheta = saturate(requiredAngTheta, limitAngle);
 
-    requiredAngRateTheta = -(requiredAngTheta - currentAngTheta)/0.5;
+    requiredAngRateTheta = (currentAngTheta - requiredAngTheta)/0.5;
     t = linspace(0, deltaT, 3);
 
     ref = [requiredAngRateTheta, requiredAngRateTheta, requiredAngRateTheta];        % Required velocity
     meas = [currentAngRateTheta, currentAngRateTheta, currentAngRateTheta];          % Current velocity
     u = [ref;meas];
 
-    thetaAxisControlActions = lsim(mysysTheta, u, t);
+    thetaAxisControlActions = -lsim(mysysTheta, u, t);
     clear u t ref meas
 
-    MomentY = thetaAxisControlActions(end) * quadcopter.physicalParameters.I(1,1);
-    MomentX = 0;
+    MomentY = thetaAxisControlActions(end) * quadcopter.physicalParameters.I(1,1); 
 
     % %% Y
     % currentVelY = quadcopterActualState.BodyXYZVelocity.Y;
@@ -242,7 +253,7 @@ for i = 0 : deltaT : simulationTime
     quadcopter.AttitudeControlAction(MomentX, MomentY, 0);
 
     %% Visualization
-    % if mod(i,deltaT*speedUp) == 0 || i > 110% the multiplicator of deltaT speeds up the simulation this many times 
+    if mod(i,deltaT*speedUp) == 0 % the multiplicator of deltaT speeds up the simulation this many times 
         hold off
         plot3(quadcopterActualState.BodyXYZPosition.X,quadcopterActualState.BodyXYZPosition.Y,quadcopterActualState.BodyXYZPosition.Z,'x',Color="#00FF00")
         hold on
@@ -253,11 +264,16 @@ for i = 0 : deltaT : simulationTime
         xlabel('x')
         ylabel('y')
         zlabel('z')
-        pause(0.00001)
         disp('Current time is:')
         disp(i)
         clear X Y Z
-    % end
+        pause(0.00001)
+    end
+
+    % Vizualizace v x ose
+        % hold on
+        % plot(i,quadcopterActualState.BodyXYZPosition.X, '.k')
+        % pause(0.00001)
 
 
 
@@ -293,7 +309,8 @@ for i = 0 : deltaT : simulationTime
     
     % Crash check
     if (quadcopterActualState.BodyXYZPosition.Z >= 0)
-        msgbox('Quadcopter Crashed!', 'Error', 'error');
+        % msgbox('Quadcopter Crashed!', 'Error', 'error');
+        close
         break;
     end
 
