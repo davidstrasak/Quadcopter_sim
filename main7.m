@@ -2,7 +2,7 @@ clc, clear, clf, close, format compact;
 
 %% Instructions
 % At these times, the quadcopter must pass the appropriate waypoint
-timeForWaypointPassage = [110,220,330,440,550]; % [s]
+timeForWaypointPassage = [110,220,330,440,550]/11; % [s]
 
 % Waypoints - these points must be flown by quadcopter
 wayPoints = [0 0 -6;        % [X, Y, Z] - waypoint in [m]
@@ -140,7 +140,7 @@ angleLimit = 0.01;    % Maximum allowed tilt angle (radians)
 figure(WindowState="maximized")
 hold on
 grid on
-speedUp = 50;  % Simulation speedup factor
+speedUp = 25;  % Simulation speedup factor
 
 pause(2)
 
@@ -182,7 +182,7 @@ for timeStep = 0 : deltaT : simulationTime
     altitudeCommand = lsim(altitudeController, inputAlt, timeVec);
     
     % Total thrust = hover thrust (mg) + correction
-    thrustCommand = Mass * grav + altitudeCommand(end);
+    thrustCommand = Mass * (grav + altitudeCommand(end));
     quadcopter.TotalThrustControlAction(thrustCommand);
 
     %% Forward control (X-axis)
